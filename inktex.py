@@ -205,12 +205,6 @@ class Converter(object):
 
 
 class InkTex(inkex.Effect):
-    skeleton = r"""\documentclass{article}
-                \begin{document}
-                \pagestyle{empty}
-                \noindent
-                    %s
-                \end{document}"""
 
     def __init__(self):
         inkex.Effect.__init__(self)
@@ -224,9 +218,8 @@ class InkTex(inkex.Effect):
 
     def render(self, tex):
         with Converter() as renderer:
-            renderer.write_latex(tex)
-
             try:
+                renderer.write_latex(tex)
                 renderer.compile()
                 svg_tree = renderer.get_svg_group(tex)
                 self.copy_styles(svg_tree)
