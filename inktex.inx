@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
+  <_name>inktex</_name>
+  <id>com.oelerich.inktex</id>
+  <dependency type="executable" location="extensions">inktex.py</dependency>
+  <effect>
+    <object-type>all</object-type>
+  </effect>
+  <script>
+    <command reldir="extensions" interpreter="python">inktex.py</command>
+  </script>
+</inkscape-extension>
