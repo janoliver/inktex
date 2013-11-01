@@ -23,7 +23,7 @@ and inserting the result into the inkscape document.
 
 import tempfile
 import os
-import subprocess
+import subprocess as sp
 import shutil
 import copy
 import time
@@ -99,6 +99,9 @@ class Ui(object):
         self.box_container = gtk.VBox(False, 5)
         self.box_container.show()
 
+        self.notebook = gtk.Notebook()
+        self.notebook.show()
+
         # First component: The input text view for the LaTeX code.
         # It lives in a ScrolledWindow so we can get some scrollbars when the
         # text is too long.
@@ -113,9 +116,51 @@ class Ui(object):
         self.text_container.set_size_request(400, 200)
         self.text_container.show()
 
-        self.box_container.pack_start(self.text_container, True, True)
+        self.notebook.append_page(self.text_container, gtk.Label("LaTeX"))
 
-        # separator between buttonbar and textview
+        # Second component: The log view
+        self.log_view = gtk.TextView()
+        self.log_view.show()
+        self.log_container = gtk.ScrolledWindow()
+        self.log_container.set_policy(gtk.POLICY_AUTOMATIC,
+                                       gtk.POLICY_AUTOMATIC)
+        self.log_container.set_shadow_type(gtk.SHADOW_IN)
+        self.log_container.add(self.log_view)
+        self.log_container.set_size_request(400, 200)
+        self.log_container.show()
+
+        self.notebook.append_page(self.log_container, gtk.Label("Log"))
+
+        # third component: settings
+        self.settings_container = gtk.Table(2,2)
+        self.settings_container.show()
+        self.label_preamble = gtk.Label("Preamble")
+        self.label_preamble.set_alignment(0, 0.5)
+        self.label_preamble.show()
+        self.preamble = gtk.FileChooserButton("...")
+        self.preamble.set_action(gtk.FILE_CHOOSER_ACTION_OPEN)
+        self.preamble.show()
+        self.settings_container.attach(self.label_preamble, yoptions=gtk.SHRINK,
+            left_attach=0, right_attach=1, top_attach=0, bottom_attach=1)
+        self.settings_container.attach(self.preamble, yoptions=gtk.SHRINK,
+            left_attach=1, right_attach=2, top_attach=0, bottom_attach=1)
+
+        self.label_scale = gtk.Label("Scale")
+        self.label_scale.set_alignment(0, 0.5)
+        self.label_scale.show()
+        self.scale_adjustment = gtk.Adjustment(value=1.0, lower=0, step_incr=0.1)
+        self.scale = gtk.SpinButton(adjustment=self.scale_adjustment, digits=1)
+        self.scale.show()
+        self.settings_container.attach(self.label_scale, yoptions=gtk.SHRINK,
+            left_attach=0, right_attach=1, top_attach=1, bottom_attach=2)
+        self.settings_container.attach(self.scale, yoptions=gtk.SHRINK,
+            left_attach=1, right_attach=2, top_attach=1, bottom_attach=2)
+
+        self.notebook.append_page(self.settings_container, gtk.Label("Settings"))
+
+        self.box_container.pack_start(self.notebook, True, True)
+
+        # separator between buttonbar and notebook
         self.separator_buttons = gtk.HSeparator()
         self.separator_buttons.show()
 
@@ -142,6 +187,11 @@ class Ui(object):
         self.window.add(self.box_container)
         self.window.set_default(self.button_render)
         self.window.show()
+
+    def log(self, msg):
+        buffer = self.log_view.get_buffer()
+        buffer.set_text(msg)
+        self.notebook.set_current_page(1)
 
     def main(self):
         gtk.main()
@@ -212,9 +262,9 @@ class Converter(object):
 
         # try svg executables
         try:
-            subprocess.call(self.compiler_dvi.split(" "),
+            sp.call(self.compiler_dvi.split(" "),
                             stdout=devnull, stderr=devnull)
-            subprocess.call(self.converter_dvi.split(" "),
+            sp.call(self.converter_dvi.split(" "),
                             stdout=devnull, stderr=devnull)
 
             self.compiler = self.compiler_dvi.split(" ")
@@ -226,9 +276,9 @@ class Converter(object):
 
         # try pdf executables
         try:
-            subprocess.call(self.compiler_pdf.split(" "),
+            sp.call(self.compiler_pdf.split(" "),
                             stdout=devnull, stderr=devnull)
-            subprocess.call(self.converter_pdf.split(" "),
+            sp.call(self.converter_pdf.split(" "),
                             stdout=devnull, stderr=devnull)
 
             self.compiler = self.compiler_pdf.split(" ")
@@ -269,16 +319,16 @@ class Converter(object):
     def compile(self):
         """compile the latex file. Raise CompilerException on errors"""
 
-        proc = subprocess.Popen(
+        proc = sp.Popen(
             self.compiler, cwd=self.tmp_dir,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE
+            stdout=sp.PIPE, stderr=sp.PIPE,
+            stdin=sp.PIPE
         )
 
         out, err = proc.communicate()
 
         if proc.returncode:
-            raise CompilerException(err)
+            raise CompilerException(out)
 
     def convert(self):
         """Convert the generated file to svg. Raise ConverterException on err"""
@@ -286,16 +336,16 @@ class Converter(object):
         # check, which path we are going to take.
 
 
-        proc = subprocess.Popen(
+        proc = sp.Popen(
             self.converter, cwd=self.tmp_dir,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE
+            stdout=sp.PIPE, stderr=sp.PIPE,
+            stdin=sp.PIPE
         )
 
         out, err = proc.communicate()
 
         if proc.returncode:
-            raise ConverterException(err)
+            raise ConverterException(out)
 
 
     def get_svg_group(self):
@@ -385,7 +435,7 @@ class InkTex(inkex.Effect):
 
                 return True
             except Exception, e:
-                self.error(e.message)
+                self.ui.log(e.message)
 
     def append_or_replace(self):
         """Appends the new object to the document or, if we edited an old
@@ -428,6 +478,8 @@ class InkTex(inkex.Effect):
     def copy_styles(self):
         """Copy the styles and transforms if we edited an old element.
         This can be extended further, to include colors etc."""
+
+        self.ui.log("Hallo")
 
         transform_attrib = 'transform'
         transform_attrib_ns = '{%s}transform' % Converter.svg_namespace
