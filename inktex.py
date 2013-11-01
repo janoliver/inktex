@@ -27,6 +27,7 @@ import subprocess
 import shutil
 import copy
 import time
+import re
 
 import pygtk
 pygtk.require('2.0')
@@ -35,6 +36,12 @@ import gtk
 from gtkcodebuffer import CodeBuffer, SyntaxLoader
 import inkex
 
+
+
+def log(txt):
+    u = open("/home/oelerich/out", "a")
+    u.write(txt + '\n')
+    u.close()
 
 class Ui(object):
     """
@@ -46,11 +53,10 @@ class Ui(object):
     app_name = 'InkTeX'
 
     def __init__(self, render_callback, src):
-        """
-        Takes the following parameters:
+        """Takes the following parameters:
           * render_callback: callback function to execute with "apply" button
-          * src: source code that should be pre-inserted into the LaTeX input
-        """
+          * src: source code that should be pre-inserted into the LaTeX input"""
+
         self.render_callback = render_callback
         self.src = src if src else ""
 
@@ -61,10 +67,9 @@ class Ui(object):
         self.setup_ui()
 
     def render(self, widget, data=None):
-        """
-        Extracts the input LaTeX code and calls the render callback. If that
-        returns true, we quit and are happy.
-        """
+        """Extracts the input LaTeX code and calls the render callback. If that
+        returns true, we quit and are happy."""
+
         buf = self.text.get_buffer()
         tex = buf.get_text(buf.get_start_iter(), buf.get_end_iter())
 
@@ -73,22 +78,18 @@ class Ui(object):
             return False
 
     def cancel(self, widget, data=None):
-        """
-        Close button pressed: Exit
-        """
+        """Close button pressed: Exit"""
+
         raise SystemExit(1)
 
     def destroy(self, widget, event, data=None):
-        """
-        Destroy hook for the GTK window. Quit and return False.
-        """
+        """Destroy hook for the GTK window. Quit and return False."""
+
         gtk.main_quit()
         return False
 
     def setup_ui(self):
-        """
-        Creates the actual UI.
-        """
+        """Creates the actual UI."""
 
         # create a floating toplevel window and set some title and border
         self.window = gtk.Window(gtk.WINDOW_TOPLEVEL)
@@ -168,6 +169,11 @@ class Converter(object):
     """
     This class is responsible for creating a temporary folder, generating the
     latex document, compiling it and converting it into svg.
+    The class should be used with a with statement, so temporary stuff can
+    be cleaned up:
+
+        with Converter() as conv:
+            conv.run()
     """
 
     skeleton = r"""\documentclass{article}
@@ -181,46 +187,80 @@ class Converter(object):
     pdf_file = 'inktex.pdf'
     svg_file = 'inktex.svg'
 
-    inktex_src_namespace = u'{http://www.oelerich.org/inktex}src'
-    svg_g_namespace = u'{http://www.w3.org/2000/svg}g'
+    inktex_namespace = u'http://www.oelerich.org/inktex'
+    svg_namespace = u'http://www.w3.org/2000/svg'
+    xlink_namespace = u'http://www.w3.org/1999/xlink'
+
+    namespaces = {
+        u'inktex': inktex_namespace,
+        u'svg': svg_namespace,
+        u'xlink': xlink_namespace,
+    }
 
     compiler = 'pdflatex'
     converter = 'pdf2svg'
 
+
     def __enter__(self):
+        """Create temporary directory for the convertion"""
+
         self.tmp_dir = tempfile.mkdtemp()
         return self
 
     def __exit__(self, type, value, traceback):
+        """Clean up temporary files"""
+
         shutil.rmtree(self.tmp_dir)
 
+    def render(self, src):
+        """Executes some functions in order"""
+
+        self.write_latex(src)
+        self.compile()
+        self.convert()
+        return self.get_svg_group()
+
     def write_latex(self, tex_code):
+        """Generate the latex file"""
+
         f = open(os.path.join(self.tmp_dir, self.tex_file), 'w')
         f.write(self.skeleton % tex_code)
         f.close()
 
     def compile(self):
-        proc_latex = subprocess.Popen(
+        """compile the latex file. Raise CompilerException on errors"""
+
+        proc = subprocess.Popen(
             [self.compiler, self.tex_file], cwd=self.tmp_dir,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE
         )
 
-        latex_out, latex_err =  proc_latex.communicate()
+        out, err = proc.communicate()
 
-        if proc_latex.returncode:
-            raise CompilerException(latex_err)
+        if proc.returncode:
+            raise CompilerException(err)
 
-        proc_pdf2svg = subprocess.Popen(
+    def convert(self):
+        """Convert the generated file to svg. Raise ConverterException on err"""
+
+        proc = subprocess.Popen(
             [self.converter, self.pdf_file, self.svg_file], cwd=self.tmp_dir,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE
         )
 
-        pdf2svg_out, pdf2svg_err =  proc_pdf2svg.communicate()
+        out, err = proc.communicate()
 
-        if proc_latex.returncode:
-            raise ConverterException(pdf2svg_err)
+        if proc.returncode:
+            raise ConverterException(err)
 
-    def get_svg_group(self, tex):
+
+    def get_svg_group(self):
+        """this function parses the generated svg and returns a single
+        svg group with all its contents. The ids of the elements are
+        made unique so we don't run into problems in inkscape later."""
+
         tree = inkex.etree.parse(os.path.join(self.tmp_dir, self.svg_file))
         root = tree.getroot()
 
@@ -228,73 +268,143 @@ class Converter(object):
 
         master_group = inkex.etree.SubElement(root, 'g')
         for c in root:
-            if c is master_group:
-                continue
-            master_group.append(c)
-
-        # add information
-        master_group.attrib[self.inktex_src_namespace] = tex.encode('string-escape')
+            if c is not master_group:
+                master_group.append(c)
 
         return copy.copy(master_group)
 
     def scramble_ids(self, root):
+        """Here, we assign new ids to the elements in the newly generated
+        svg object. We also have to update references and links."""
+
+        href_map = dict()
+        ns = self.namespaces
+        xlink_key = '{%s}href' % self.xlink_namespace
+        clip_path_key = 'clip_path'
+
+        # Map items to new ids
         for i, el in enumerate(root.xpath('//*[attribute::id]')):
-            el.attrib['id'] = '%s-%s' % (time.time(), i)
+            cur_id = el.attrib['id']
+            new_id = '%s-%s' % (time.time(), i)
+            href_map['#' + cur_id] = "#" + new_id
+            el.attrib['id'] = new_id
+
+        # Replace hrefs
+        url_re = re.compile('^url\((.*)\)$')
+
+        for el in root.xpath('//*[attribute::xlink:href]', namespaces=ns):
+            cur_href = el.attrib[xlink_key]
+            el.attrib[xlink_key] = href_map.get(cur_href, cur_href)
+
+        for el in root.xpath('//*[attribute::svg:clip-path]', namespaces=ns):
+            m = url_re.match(el.attrib['clip-path'])
+            if m:
+                el.attrib[clip_path_key] = 'url(%s)' % href_map.get(
+                    m.group(1), m.group(1)
+                )
+
 
 class InkTex(inkex.Effect):
-    skeleton = r"""\documentclass{article}
-                \begin{document}
-                \pagestyle{empty}
-                \noindent
-                    %s
-                \end{document}"""
+    """
+    Our main class, derived from inkex.Effect. It wraps the other classes and
+    implements the effect() function.
+    """
 
     def __init__(self):
         inkex.Effect.__init__(self)
+
+        # the original (i.e., selected) svg element and the newly created one
+        # including the original LaTeX source.
         self.orig = None
+        self.orig_src = None
+        self.new = None
+        self.new_src = None
 
     def effect(self):
-        self.orig, src = self.get_original()
+        """If there is an original element, store it. Open the GUI."""
 
-        self.ui = Ui(self.render, src)
+        self.orig, self.orig_src = self.get_original()
+
+        self.ui = Ui(self.render, self.orig_src)
         self.ui.main()
 
     def render(self, tex):
-        with Converter() as renderer:
-            renderer.write_latex(tex)
+        """Execute the rendering and, upon errors, send them to the UI"""
 
+        self.new_src = tex
+
+        with Converter() as renderer:
             try:
-                renderer.compile()
-                svg_tree = renderer.get_svg_group(tex)
-                self.append_or_replace(svg_tree)
+                self.new = renderer.render(self.new_src)
+
+                self.copy_styles()
+                self.store_inktex_information()
+                self.append_or_replace()
+
                 return True
             except Exception, e:
                 self.error(e.message)
 
-    def append_or_replace(self, object):
+    def append_or_replace(self):
+        """Appends the new object to the document or, if we edited an old
+        one, replace the old one."""
+
         if self.orig is not None:
             parent = self.orig.getparent()
             parent.remove(self.orig)
-            parent.append(object)
+            parent.append(self.new)
         else:
-            self.current_layer.append(object)
+            self.current_layer.append(self.new)
 
     def error(self, msg):
+        """Display an error in the UI"""
+
         inkex.errormsg(msg)
 
     def get_original(self):
-        src_attrib = Converter.inktex_src_namespace
+        """Here, we try to find inktex objects among the selected svg elements
+        when the dialog was opened."""
+
+        src_attrib = '{%s}src' % Converter.inktex_namespace
+        g_tag = '{%s}g' % Converter.svg_namespace
+
         for i in self.options.ids:
             node = self.selected[i]
 
-            if node.tag != Converter.svg_g_namespace:
-                continue
-
-            if src_attrib in node.attrib:
-                return node, node.attrib.get(src_attrib, '').decode(
-                    'string-escape')
+            if node.tag == g_tag and src_attrib in node.attrib:
+                return node, \
+                       node.attrib.get(src_attrib, '').decode('string-escape')
 
         return None, None
+
+    def store_inktex_information(self):
+        """Store the LaTeX source in the top level element."""
+
+        self.new.attrib['{%s}src' % Converter.inktex_namespace] = \
+            self.new_src.encode('string-escape')
+
+    def copy_styles(self):
+        """Copy the styles and transforms if we edited an old element.
+        This can be extended further, to include colors etc."""
+
+        transform_attrib = 'transform'
+        transform_attrib_ns = '{%s}transform' % Converter.svg_namespace
+        style_attrib = 'style'
+
+        if self.orig is None:
+            return
+
+        if transform_attrib in self.orig.attrib:
+            self.new.attrib[transform_attrib] = \
+                self.orig.attrib[transform_attrib]
+
+        if transform_attrib_ns in self.orig.attrib:
+            self.new.attrib[transform_attrib] = \
+                self.orig.attrib[transform_attrib_ns]
+
+        if style_attrib in self.orig.attrib:
+            self.new.attrib[style_attrib] = self.orig.attrib[style_attrib]
+
 
 
 if __name__ == "__main__":
