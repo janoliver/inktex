@@ -37,12 +37,6 @@ from gtkcodebuffer import CodeBuffer, SyntaxLoader
 import inkex
 
 
-
-def log(txt):
-    u = open("/home/oelerich/out", "a")
-    u.write(txt + '\n')
-    u.close()
-
 class Ui(object):
     """
     The user interface. This dialog is the LaTeX input window and includes
@@ -165,6 +159,12 @@ class ConverterException(Exception):
     """
     pass
 
+class DependencyException(Exception):
+    """
+    Exception thrown, when not converter/compiler can be found
+    """
+    pass
+
 class Converter(object):
     """
     This class is responsible for creating a temporary folder, generating the
@@ -185,6 +185,7 @@ class Converter(object):
 
     tex_file = 'inktex.tex'
     pdf_file = 'inktex.pdf'
+    dvi_file = 'inktex.dvi'
     svg_file = 'inktex.svg'
 
     inktex_namespace = u'http://www.oelerich.org/inktex'
@@ -197,9 +198,47 @@ class Converter(object):
         u'xlink': xlink_namespace,
     }
 
-    compiler = 'pdflatex'
-    converter = 'pdf2svg'
+    compiler_pdf = 'pdflatex %s' % tex_file
+    converter_pdf = 'pdf2svg %s %s' % (pdf_file, svg_file)
+    compiler_dvi = 'latex %s' % tex_file
+    converter_dvi = 'dvisvgm -n %s' % dvi_file
 
+    def __init__(self):
+        # find out which compiler/converter we'll use
+        devnull = open(os.devnull, 'w')
+
+        self.compiler = None
+        self.converter = None
+
+        # try svg executables
+        try:
+            subprocess.call(self.compiler_dvi.split(" "),
+                            stdout=devnull, stderr=devnull)
+            subprocess.call(self.converter_dvi.split(" "),
+                            stdout=devnull, stderr=devnull)
+
+            self.compiler = self.compiler_dvi.split(" ")
+            self.converter = self.converter_dvi.split(" ")
+
+            return
+        except:
+            pass
+
+        # try pdf executables
+        try:
+            subprocess.call(self.compiler_pdf.split(" "),
+                            stdout=devnull, stderr=devnull)
+            subprocess.call(self.converter_pdf.split(" "),
+                            stdout=devnull, stderr=devnull)
+
+            self.compiler = self.compiler_pdf.split(" ")
+            self.converter = self.converter_pdf.split(" ")
+
+            return
+        except:
+            pass
+
+        raise DependencyException()
 
     def __enter__(self):
         """Create temporary directory for the convertion"""
@@ -231,7 +270,7 @@ class Converter(object):
         """compile the latex file. Raise CompilerException on errors"""
 
         proc = subprocess.Popen(
-            [self.compiler, self.tex_file], cwd=self.tmp_dir,
+            self.compiler, cwd=self.tmp_dir,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE
         )
@@ -244,8 +283,11 @@ class Converter(object):
     def convert(self):
         """Convert the generated file to svg. Raise ConverterException on err"""
 
+        # check, which path we are going to take.
+
+
         proc = subprocess.Popen(
-            [self.converter, self.pdf_file, self.svg_file], cwd=self.tmp_dir,
+            self.converter, cwd=self.tmp_dir,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.PIPE
         )
