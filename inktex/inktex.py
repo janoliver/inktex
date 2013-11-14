@@ -1,3 +1,6 @@
+#!/usr/bin/env python2
+
+"""
 # InkTeX
 
 `InkTex` is an inkscape plugin to add `LaTeX` compiled objects to your
@@ -41,3 +44,10 @@ The LaTeX code you write is only the stuff between `\begin{document}` and
 
 The preamble file and scale factor are stored on a per-drawing basis, so in a
 new document, these information must be set again.
+"""
+
+from inktex_cls import InkTex
+
+if __name__ == "__main__":
+    it = InkTex()
+    it.affect()
