@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
-  <_name>inktex</_name>
+  <_name>InkTeX</_name>
   <id>com.oelerich.inktex</id>
   <dependency type="executable" location="extensions">inktex/inktex.py</dependency>
   <dependency type="executable" location="extensions">inkex.py</dependency>
