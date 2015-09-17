@@ -1,4 +1,4 @@
 all:
-	mkdir -p "~/.config/inkscape/extensions"; \
-	cp -r inktex/ inktex.inx ~/.config/inkscape/extensions
+	mkdir -p "${HOME}/.config/inkscape/extensions"; \
+	cp -r inktex/ inktex.inx "${HOME}/.config/inkscape/extensions"
 	@echo "Done."
